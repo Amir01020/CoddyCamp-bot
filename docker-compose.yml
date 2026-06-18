@@ -6,7 +6,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-laptop_secret}
       MYSQL_DATABASE: ${DB_NAME:-laptop_tracker}
-      TZ: ${TZ:-Europe/Moscow}
+      TZ: ${TZ:-Asia/Tashkent}
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -29,6 +29,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-laptop_secret}
       DB_NAME: ${DB_NAME:-laptop_tracker}
       NODE_ENV: production
+      TZ: ${TZ:-Asia/Tashkent}
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       mysql:
         condition: service_healthy

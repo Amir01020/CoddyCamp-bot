@@ -8,7 +8,7 @@ module.exports = {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,
     dialect: 'mysql',
-    timezone: '+03:00',
+    timezone: process.env.DB_TIMEZONE || '+05:00',
     logging: false,
   },
   production: {
@@ -18,7 +18,7 @@ module.exports = {
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT) || 3306,
     dialect: 'mysql',
-    timezone: '+03:00',
+    timezone: process.env.DB_TIMEZONE || '+05:00',
     logging: false,
   },
 };
