@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const { Telegraf, session } = require('telegraf');
-const { HttpsProxyAgent } = require('https-proxy-agent');
+const { createProxyAgent, maskProxyUrl } = require('./proxy');
 const { sequelize } = require('../models');
 const { adminOnly, getAdminIds } = require('./middlewares/isAdmin');
 const { mainMenu } = require('./keyboards');
@@ -18,8 +18,8 @@ const proxyUrl = process.env.TELEGRAM_PROXY || process.env.HTTPS_PROXY;
 const botOptions = {};
 
 if (proxyUrl) {
-  botOptions.telegram = { agent: new HttpsProxyAgent(proxyUrl) };
-  console.log('🌐 Используется прокси для Telegram:', proxyUrl.replace(/:[^:@]+@/, ':***@'));
+  botOptions.telegram = { agent: createProxyAgent(proxyUrl) };
+  console.log('🌐 Используется прокси для Telegram:', maskProxyUrl(proxyUrl));
 }
 
 const bot = new Telegraf(token, botOptions);
