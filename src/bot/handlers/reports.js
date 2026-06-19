@@ -1,9 +1,10 @@
 const reportService = require('../../services/reportService');
 const { STEPS, clearState } = require('./admin');
-const { mainMenu, cancelMenu } = require('../keyboards');
+const { menuForRole, cancelMenu } = require('../keyboards');
+const { getUserRole } = require('../middlewares/isAdmin');
 
-function registerReportHandlers(bot) {
-  bot.hears('📅 Сегодня', async (ctx) => {
+function registerReportHandlers(bot, adminOnly) {
+  bot.hears('📅 Сегодня', adminOnly, async (ctx) => {
     try {
       const transactions = await reportService.getTodayReport();
       await ctx.reply(reportService.formatTodayReport(transactions));
@@ -12,7 +13,7 @@ function registerReportHandlers(bot) {
     }
   });
 
-  bot.hears('⏳ Не возвращены', async (ctx) => {
+  bot.hears('⏳ Не возвращены', adminOnly, async (ctx) => {
     try {
       const transactions = await reportService.getActiveIssues();
       await ctx.reply(reportService.formatActiveReport(transactions));
@@ -21,7 +22,7 @@ function registerReportHandlers(bot) {
     }
   });
 
-  bot.hears('💻 По номеру ноутбука', async (ctx) => {
+  bot.hears('💻 По номеру ноутбука', adminOnly, async (ctx) => {
     ctx.session = ctx.session || {};
     ctx.session.step = STEPS.LAPTOP_QUERY;
     ctx.session.data = {};
@@ -36,13 +37,14 @@ function registerReportHandlers(bot) {
     try {
       const transactions = await reportService.getLaptopTodayReport(text);
       clearState(ctx);
-      await ctx.reply(reportService.formatLaptopReport(text, transactions), mainMenu());
+      const role = await getUserRole(ctx.from.id);
+      await ctx.reply(reportService.formatLaptopReport(text, transactions), menuForRole(role));
     } catch (err) {
       await ctx.reply(`❌ ${err.message}`);
     }
   });
 
-  bot.command('today', async (ctx) => {
+  bot.command('today', adminOnly, async (ctx) => {
     try {
       const transactions = await reportService.getTodayReport();
       await ctx.reply(reportService.formatTodayReport(transactions));
@@ -51,7 +53,7 @@ function registerReportHandlers(bot) {
     }
   });
 
-  bot.command('laptop', async (ctx) => {
+  bot.command('laptop', adminOnly, async (ctx) => {
     const number = ctx.message.text.split(' ').slice(1).join(' ').trim();
     if (!number) {
       await ctx.reply('Использование: /laptop 15');

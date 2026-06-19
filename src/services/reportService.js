@@ -2,6 +2,14 @@ const { Op } = require('sequelize');
 const { Transaction, Student, Laptop } = require('../models');
 const { getTodayRange, formatTime } = require('../utils/date');
 
+function recipientLabel(transaction) {
+  const name = transaction.student.name;
+  if (transaction.recipientType === 'teacher') {
+    return `${name} (учитель)`;
+  }
+  return name;
+}
+
 async function getTodayReport() {
   const { start, end } = getTodayRange();
 
@@ -57,7 +65,7 @@ function formatTodayReport(transactions) {
   const active = [];
 
   for (const t of transactions) {
-    const line = `• ${t.student.name} — ноут №${t.laptop.number} (с ${formatTime(t.issuedAt)})`;
+    const line = `• ${recipientLabel(t)} — ноут №${t.laptop.number} (с ${formatTime(t.issuedAt)})`;
     if (t.returnedAt) {
       returned.push(`${line} → вернул в ${formatTime(t.returnedAt)}`);
     } else {
@@ -84,7 +92,7 @@ function formatLaptopReport(laptopNumber, transactions) {
   }
 
   const lines = transactions.map((t) => {
-  const issued = `${formatTime(t.issuedAt)} — выдал ${t.student.name}`;
+    const issued = `${formatTime(t.issuedAt)} — выдал ${recipientLabel(t)}`;
     if (t.returnedAt) {
       return `• ${issued} → вернул в ${formatTime(t.returnedAt)}`;
     }
@@ -100,7 +108,7 @@ function formatActiveReport(transactions) {
   }
 
   const lines = transactions.map(
-    (t) => `• ${t.student.name} — ноут №${t.laptop.number} (с ${formatTime(t.issuedAt)})`
+    (t) => `• ${recipientLabel(t)} — ноут №${t.laptop.number} (с ${formatTime(t.issuedAt)})`
   );
 
   return ['⏳ Сейчас не возвращены:', '', ...lines].join('\n');

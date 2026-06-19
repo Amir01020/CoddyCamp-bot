@@ -37,6 +37,12 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: 'returned_by',
       },
+      recipientType: {
+        type: DataTypes.ENUM('student', 'teacher'),
+        allowNull: false,
+        defaultValue: 'student',
+        field: 'recipient_type',
+      },
     },
     {
       tableName: 'transactions',

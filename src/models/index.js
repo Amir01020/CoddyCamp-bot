@@ -14,6 +14,7 @@ const sequelize = new Sequelize(
 const Student = require('./Student')(sequelize, Sequelize.DataTypes);
 const Laptop = require('./Laptop')(sequelize, Sequelize.DataTypes);
 const Transaction = require('./Transaction')(sequelize, Sequelize.DataTypes);
+const SupportUser = require('./SupportUser')(sequelize, Sequelize.DataTypes);
 
 Student.hasMany(Transaction, { foreignKey: 'student_id', as: 'transactions' });
 Transaction.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -27,4 +28,5 @@ module.exports = {
   Student,
   Laptop,
   Transaction,
+  SupportUser,
 };

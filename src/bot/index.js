@@ -3,8 +3,8 @@ require('dotenv').config();
 const { Telegraf, session } = require('telegraf');
 const { createProxyAgent, maskProxyUrl } = require('./proxy');
 const { sequelize } = require('../models');
-const { adminOnly, getAdminIds } = require('./middlewares/isAdmin');
-const { mainMenu } = require('./keyboards');
+const { adminOnly, canIssueReturn, authorizedOnly, getAdminIds, getUserRole } = require('./middlewares/isAdmin');
+const { menuForRole } = require('./keyboards');
 const { registerAdminHandlers } = require('./handlers/admin');
 const { registerReportHandlers } = require('./handlers/reports');
 
@@ -24,41 +24,65 @@ if (proxyUrl) {
 
 const bot = new Telegraf(token, botOptions);
 bot.use(session());
+bot.use(authorizedOnly);
+
+bot.command('myid', async (ctx) => {
+  const role = await getUserRole(ctx.from.id);
+  if (role) {
+    await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}`);
+    return;
+  }
+
+  await ctx.reply(
+    `Ваш Telegram ID: ${ctx.from.id}\n\n` +
+      'Передайте этот ID администратору, чтобы получить доступ к боту.'
+  );
+});
 
 bot.start(async (ctx) => {
   const admins = getAdminIds();
+  const role = await getUserRole(ctx.from.id);
   const adminHint = admins.length
     ? ''
     : '\n\n⚠️ ADMIN_IDS не задан — сейчас все пользователи считаются админами.\nДобавьте свой ID в .env после команды /myid';
 
+  let roleHint = '';
+  if (role === 'support') {
+    roleHint = '\n\nВы — супорт. Доступны только выдача и возврат ноутбуков ученикам.';
+  }
+
   await ctx.reply(
     '👋 Бот учёта ноутбуков\n\n' +
       'Используйте кнопки меню:\n' +
-      '• Выдать / вернуть ноутбук (админ)\n' +
-      '• Сегодня — кто брал и кто вернул\n' +
-      '• По номеру — кто брал конкретный ноут\n' +
-      '• Не возвращены — кто ещё не сдал' +
-      adminHint,
-    mainMenu()
+      '• Выдать / вернуть ноутбук\n' +
+      '• Выдать учителю — несколько ноутов на урок (админ)\n' +
+      '• Вернуть от учителя — все ноуты учителя сразу (админ)\n' +
+      '• Сегодня — кто брал и кто вернул (админ)\n' +
+      '• По номеру — кто брал конкретный ноут (админ)\n' +
+      '• Не возвращены — кто ещё не сдал (админ)\n' +
+      '• Супорты — назначение супортов (админ)' +
+      adminHint +
+      roleHint,
+    menuForRole(role)
   );
-});
-
-bot.command('myid', async (ctx) => {
-  await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}\n\nДобавьте его в ADMIN_IDS в файле .env`);
 });
 
 bot.help(async (ctx) => {
-  await ctx.reply(
+  const role = await getUserRole(ctx.from.id);
+  let text =
     'Команды:\n' +
-      '/start — меню\n' +
-      '/myid — узнать свой Telegram ID\n' +
-      '/today — кто брал сегодня\n' +
-      '/laptop 15 — кто брал ноут №15 сегодня'
-  );
+    '/start — меню\n' +
+    '/myid — узнать свой Telegram ID\n';
+
+  if (role === 'admin') {
+    text += '/today — кто брал сегодня\n' + '/laptop 15 — кто брал ноут №15 сегодня';
+  }
+
+  await ctx.reply(text);
 });
 
-registerReportHandlers(bot);
-registerAdminHandlers(bot, adminOnly);
+registerAdminHandlers(bot, adminOnly, canIssueReturn);
+registerReportHandlers(bot, adminOnly);
 
 async function start() {
   try {
