@@ -16,6 +16,17 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: 'group_name',
       },
+      isAllowed: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'is_allowed',
+      },
+      activeUntil: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'active_until',
+      },
     },
     {
       tableName: 'students',

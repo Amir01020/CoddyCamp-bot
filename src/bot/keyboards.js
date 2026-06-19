@@ -1,44 +1,76 @@
 const { Markup } = require('telegraf');
-const { teacherReturnButtonLabel } = require('../services/issueService');
+const { MENU } = require('./constants');
 
-const adminMenu = () =>
+const adminMainMenu = () =>
   Markup.keyboard([
-    ['📤 Выдать ноутбук', '📥 Вернуть ноутбук'],
-    ['📤 Выдать учителю', '📥 Вернуть от учителя'],
-    ['📅 Сегодня', '⏳ Не возвращены'],
-    ['💻 По номеру ноутбука', '👥 Супорты'],
+    [MENU.LAPTOPS, MENU.TEACHERS],
+    [MENU.STUDENTS, MENU.OCCUPIED],
+    [MENU.SUPPORTS],
   ]).resize();
 
-const supportMenu = () =>
-  Markup.keyboard([['📤 Выдать ноутбук', '📥 Вернуть ноутбук']]).resize();
+const supportMainMenu = () =>
+  Markup.keyboard([
+    [MENU.LAPTOPS, MENU.TEACHERS],
+    [MENU.STUDENTS, MENU.OCCUPIED],
+  ]).resize();
 
-const cancelMenu = () => Markup.keyboard([['❌ Отмена']]).resize();
-
-const supportManageMenu = () =>
-  Markup.keyboard([['➕ Добавить супорта', '➖ Удалить супорта'], ['◀️ Назад']]).resize();
-
-function teacherReturnMenu(teachers) {
-  const rows = [];
-
-  for (let i = 0; i < teachers.length; i += 2) {
-    rows.push(teachers.slice(i, i + 2).map((teacher) => teacherReturnButtonLabel(teacher)));
-  }
-
-  rows.push(['❌ Отмена']);
+const laptopsMenu = (isAdmin) => {
+  const rows = isAdmin ? [[MENU.ADD_LAPTOP], [MENU.LAPTOP_OCCUPIED]] : [[MENU.LAPTOP_OCCUPIED]];
+  rows.push([MENU.ISSUE_LAPTOP, MENU.RETURN_LAPTOP], [MENU.BACK]);
   return Markup.keyboard(rows).resize();
-}
+};
+
+const teachersMenu = (isAdmin) => {
+  const rows = isAdmin ? [[MENU.ADD_TEACHER]] : [];
+  rows.push([MENU.TEACHER_ISSUE, MENU.TEACHER_RETURN], [MENU.BACK]);
+  return Markup.keyboard(rows).resize();
+};
+
+const teacherReturnMenu = () =>
+  Markup.keyboard([[MENU.RETURN_ALL, MENU.RETURN_PICK], [MENU.BACK]]).resize();
+
+const studentsMenu = (isAdmin) => {
+  const rows = isAdmin ? [[MENU.ADD_STUDENT], [MENU.STUDENT_LIST]] : [[MENU.STUDENT_LIST]];
+  rows.push([MENU.BACK]);
+  return Markup.keyboard(rows).resize();
+};
+
+const supportsMenu = () =>
+  Markup.keyboard([[MENU.ADD_SUPPORT, MENU.REMOVE_SUPPORT], [MENU.BACK]]).resize();
+
+const cancelMenu = () => Markup.keyboard([[MENU.CANCEL]]).resize();
 
 function menuForRole(role) {
-  if (role === 'admin') return adminMenu();
-  return supportMenu();
+  if (role === 'admin') return adminMainMenu();
+  return supportMainMenu();
+}
+
+function studentSelectInline(students) {
+  const rows = students.map((student) => [
+    Markup.button.callback(student.name, `issue:student:${student.id}`),
+  ]);
+  rows.push([Markup.button.callback(MENU.CANCEL, 'issue:student:cancel')]);
+  return Markup.inlineKeyboard(rows);
+}
+
+function teacherSelectInline(teachers, prefix) {
+  const rows = teachers.map((t) => [
+    Markup.button.callback(`${t.name} (${t.count})`, `${prefix}:${t.studentId}`),
+  ]);
+  rows.push([Markup.button.callback(MENU.CANCEL, `${prefix}:cancel`)]);
+  return Markup.inlineKeyboard(rows);
 }
 
 module.exports = {
-  adminMenu,
-  supportMenu,
-  mainMenu: adminMenu,
-  cancelMenu,
-  supportManageMenu,
+  adminMainMenu,
+  supportMainMenu,
+  laptopsMenu,
+  teachersMenu,
   teacherReturnMenu,
+  studentsMenu,
+  supportsMenu,
+  cancelMenu,
   menuForRole,
+  studentSelectInline,
+  teacherSelectInline,
 };
