@@ -15,6 +15,11 @@ const Student = require('./Student')(sequelize, Sequelize.DataTypes);
 const Laptop = require('./Laptop')(sequelize, Sequelize.DataTypes);
 const Transaction = require('./Transaction')(sequelize, Sequelize.DataTypes);
 const SupportUser = require('./SupportUser')(sequelize, Sequelize.DataTypes);
+const Settings = require('./Settings')(sequelize, Sequelize.DataTypes);
+const MentorUser = require('./MentorUser')(sequelize, Sequelize.DataTypes);
+const LaptopRequest = require('./LaptopRequest')(sequelize, Sequelize.DataTypes);
+const ReturnRequest = require('./ReturnRequest')(sequelize, Sequelize.DataTypes);
+const RequestNotification = require('./RequestNotification')(sequelize, Sequelize.DataTypes);
 
 Student.hasMany(Transaction, { foreignKey: 'student_id', as: 'transactions' });
 Transaction.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
@@ -29,4 +34,9 @@ module.exports = {
   Laptop,
   Transaction,
   SupportUser,
+  Settings,
+  MentorUser,
+  LaptopRequest,
+  ReturnRequest,
+  RequestNotification,
 };

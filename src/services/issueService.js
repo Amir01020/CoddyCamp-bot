@@ -2,7 +2,8 @@ const { Student, Laptop, Transaction, sequelize } = require('../models');
 const { isStudentActive } = require('./studentService');
 
 function formatRecipient(transaction) {
-  const label = transaction.recipientType === 'teacher' ? 'Учитель' : 'Ученик';
+  const labels = { teacher: 'Учитель', mentor: 'Ментор', student: 'Ученик' };
+  const label = labels[transaction.recipientType] || 'Ученик';
   return `${label}: ${transaction.student.name}`;
 }
 

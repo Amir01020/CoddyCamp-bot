@@ -38,7 +38,7 @@ module.exports = (sequelize, DataTypes) => {
         field: 'returned_by',
       },
       recipientType: {
-        type: DataTypes.ENUM('student', 'teacher'),
+        type: DataTypes.ENUM('student', 'teacher', 'mentor'),
         allowNull: false,
         defaultValue: 'student',
         field: 'recipient_type',

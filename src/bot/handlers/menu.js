@@ -2,37 +2,21 @@ const { MENU, STEPS } = require('../constants');
 const { clearState } = require('../session');
 const {
   menuForRole,
-  laptopsMenu,
-  teachersMenu,
-  teacherReturnMenu,
-  studentsMenu,
+  warehouseAdminMenu,
   supportsMenu,
+  mentorsMenu,
   cancelMenu,
-  studentSelectInline,
-  teacherSelectInline,
+  destMenu,
+  mentorSelectInline,
 } = require('../keyboards');
 const { getUserRole, isAdmin } = require('../middlewares/isAdmin');
-const laptopService = require('../../services/laptopService');
-const studentService = require('../../services/studentService');
 const supportService = require('../../services/supportService');
-const {
-  issueLaptop,
-  returnLaptop,
-  issueTeacherLaptopsByNumbers,
-  returnTeacherLaptops,
-  returnTeacherLaptopsPartial,
-  getTeachersWithActiveLaptops,
-  formatRecipient,
-} = require('../../services/issueService');
-const { Student } = require('../../models');
+const mentorService = require('../../services/mentorService');
+const warehouseService = require('../../services/warehouseService');
 
 async function replyMain(ctx, text) {
   const role = await getUserRole(ctx.from.id);
   await ctx.reply(text, menuForRole(role));
-}
-
-async function replySubmenu(ctx, text, keyboard) {
-  await ctx.reply(text, keyboard);
 }
 
 function ensureSession(ctx) {
@@ -40,126 +24,26 @@ function ensureSession(ctx) {
   return ctx.session;
 }
 
-async function showStudentIssueList(ctx) {
-  const students = await studentService.listAllowedStudents();
-  if (!students.length) {
-    await ctx.reply('❌ Нет активных учеников.');
-    return;
-  }
-
-  const session = ensureSession(ctx);
-  session.step = STEPS.ISSUE_STUDENT_SELECT;
-  session.data = {};
-
-  const text = (await studentService.formatStudentsDetailedList(students)) + '\n\nВыберите ученика:';
-  await ctx.reply(text, studentSelectInline(students));
+function startTakeFromWarehouse(ctx) {
+  ensureSession(ctx).step = STEPS.TAKE_WAREHOUSE_QTY;
+  ensureSession(ctx).data = {};
 }
 
-async function showLaptopIssueList(ctx, student) {
-  const laptops = await laptopService.getFreeLaptops();
-  if (!laptops.length) {
-    clearState(ctx);
-    await replyMain(ctx, '❌ Нет свободных ноутбуков.');
+async function promptTakeQuantity(ctx) {
+  const stats = await warehouseService.getWarehouseStats();
+  if (!stats.available) {
+    await ctx.reply('❌ На складе нет ноутбуков.');
     return;
   }
-
-  const session = ensureSession(ctx);
-  session.step = STEPS.ISSUE_LAPTOP_SELECT;
-  session.data = { studentId: student.id, studentName: student.name };
-
-  const text =
-    `Ученик: ${student.name}\n\n` +
-    laptopService.formatFreeLaptopsInChat(laptops) +
-    '\n\nВыберите ноутбук:';
-
-  await ctx.reply(text, laptopService.laptopSelectInline(laptops, 'issue:laptop'));
-}
-
-async function showLaptopReturnList(ctx) {
-  const transactions = await laptopService.getOccupiedLaptops();
-  if (!transactions.length) {
-    await ctx.reply('✅ Все ноутбуки на месте.');
-    return;
-  }
-
-  const session = ensureSession(ctx);
-  session.step = STEPS.LAPTOP_RETURN;
-
-  const text = laptopService.formatOccupiedLaptops(transactions) + '\n\nНажмите ноут для возврата:';
-  const { Markup } = require('telegraf');
-  const rows = transactions.map((t) => [
-    Markup.button.callback(`№${t.laptop.number} — ${t.student.name}`, `return:laptop:${t.laptop.id}`),
-  ]);
-  rows.push([Markup.button.callback(MENU.CANCEL, 'return:laptop:cancel')]);
-  await ctx.reply(text, Markup.inlineKeyboard(rows));
-}
-
-async function showTeacherLaptopPicker(ctx, edit = false) {
-  const laptops = await laptopService.getFreeLaptops();
-  const selected = ctx.session.data.selectedLaptops || [];
-
-  if (!laptops.length) {
-    clearState(ctx);
-    await replyMain(ctx, '❌ Нет свободных ноутбуков.');
-    return;
-  }
-
-  const text =
-    `Учитель: ${ctx.session.data.teacherName}\n\n` +
-    laptopService.formatFreeLaptopsInChat(laptops) +
-    '\n\nВыберите ноутбуки (нажмите для отметки):';
-
-  const markup = laptopService.laptopMultiSelectInline(laptops, selected, 'ti');
-
-  if (edit && ctx.callbackQuery) {
-    await ctx.editMessageText(text, markup);
-  } else {
-    await ctx.reply(text, markup);
-  }
-}
-
-async function showTeacherReturnPicker(ctx, teacher, edit = false) {
-  const transactions = teacher.laptops.map((num) => ({ number: num }));
-  const laptops = transactions.map((t, i) => ({ id: i, number: t.number }));
-  const selected = ctx.session.data.selectedReturnLaptops || [];
-
-  ctx.session.data.teacherReturnLaptops = teacher.laptops;
-
-  const text =
-    `Учитель: ${teacher.name}\n\n` +
-    `Ноутбуки: №${teacher.laptops.join(', №')}\n\n` +
-    'Выберите ноуты для возврата:';
-
-  const { Markup } = require('telegraf');
-  const rows = [];
-  for (let i = 0; i < teacher.laptops.length; i += 3) {
-    const chunk = teacher.laptops.slice(i, i + 3).map((num) => {
-      const mark = selected.includes(num) ? '✅ ' : '';
-      return Markup.button.callback(`${mark}№${num}`, `tr:toggle:${num}`);
-    });
-    rows.push(chunk);
-  }
-  rows.push([
-    Markup.button.callback('✅ Готово', 'tr:confirm'),
-    Markup.button.callback(MENU.CANCEL, 'tr:cancel'),
-  ]);
-  const markup = Markup.inlineKeyboard(rows);
-
-  if (edit && ctx.callbackQuery) {
-    await ctx.editMessageText(text, markup);
-  } else {
-    await ctx.reply(text, markup);
-  }
+  startTakeFromWarehouse(ctx);
+  await ctx.reply(
+    `На складе: ${stats.available} шт.\n\nСколько взять со склада?`,
+    cancelMenu()
+  );
 }
 
 function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
   bot.hears(MENU.BACK, async (ctx) => {
-    const session = ensureSession(ctx);
-    if (session.menu === 'teacher_return') {
-      session.menu = 'teachers';
-      await replySubmenu(ctx, '👨‍🏫 Учителя:', teachersMenu());
-      return;
-    }
     clearState(ctx);
     await replyMain(ctx, 'Главное меню.');
   });
@@ -169,34 +53,53 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
     await replyMain(ctx, 'Действие отменено.');
   });
 
-  // ── Main sections ──
-  bot.hears(MENU.LAPTOPS, canIssueReturn, async (ctx) => {
-    const session = ensureSession(ctx);
-    session.menu = 'laptops';
-    const role = await getUserRole(ctx.from.id);
-    await replySubmenu(ctx, '💻 Ноутбуки:', laptopsMenu(role === 'admin'));
+  bot.hears(MENU.INFO, canIssueReturn, async (ctx) => {
+    await ctx.reply(await warehouseService.formatFullInfo());
   });
 
-  bot.hears(MENU.TEACHERS, canIssueReturn, async (ctx) => {
+  bot.hears(MENU.WAREHOUSE, canIssueReturn, async (ctx) => {
     const role = await getUserRole(ctx.from.id);
-    ensureSession(ctx).menu = 'teachers';
-    await replySubmenu(ctx, '👨‍🏫 Учителя:', teachersMenu(role === 'admin'));
+    if (role === 'admin') {
+      ensureSession(ctx).menu = 'warehouse';
+      await ctx.reply('📦 Склад:', warehouseAdminMenu());
+      return;
+    }
+    await promptTakeQuantity(ctx);
   });
 
-  bot.hears(MENU.STUDENTS, canIssueReturn, async (ctx) => {
-    const session = ensureSession(ctx);
-    session.menu = 'students';
-    const role = await getUserRole(ctx.from.id);
-    await replySubmenu(ctx, '👨‍🎓 Ученики:', studentsMenu(role === 'admin'));
+  bot.hears(MENU.TAKE_FROM_WAREHOUSE, canIssueReturn, async (ctx) => {
+    await promptTakeQuantity(ctx);
   });
 
-  bot.hears(MENU.OCCUPIED, canIssueReturn, async (ctx) => {
+  bot.hears(MENU.WAREHOUSE_SET, adminOnly, async (ctx) => {
+    const stats = await warehouseService.getWarehouseStats();
+    ensureSession(ctx).step = STEPS.WAREHOUSE_SET_TOTAL;
+    await ctx.reply(
+      `Всего ноутов: ${stats.total}\nНа складе: ${stats.available}\n\nВведите новый общий размер склада:`,
+      cancelMenu()
+    );
+  });
+
+  bot.hears(MENU.DEST_COWORKING, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_WAREHOUSE_DEST || !ctx.session.data?.count) return;
     try {
-      const transactions = await laptopService.getOccupiedLaptops();
-      await ctx.reply(laptopService.formatOccupiedLaptops(transactions));
+      const result = await warehouseService.moveToCoworking({ count: ctx.session.data.count });
+      clearState(ctx);
+      await replyMain(ctx, `✅ На коворкинг: ${result.moved} шт.`);
     } catch (err) {
       await ctx.reply(`❌ ${err.message}`);
     }
+  });
+
+  bot.hears(MENU.DEST_MENTOR, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_WAREHOUSE_DEST || !ctx.session.data?.count) return;
+    const mentors = await mentorService.listMentors();
+    if (!mentors.length) {
+      await ctx.reply('❌ Нет менторов. Добавьте через меню «👨‍🏫 Менторы».');
+      return;
+    }
+    ctx.session.step = STEPS.TAKE_MENTOR_CLASS;
+    await ctx.reply('Выберите ментора:', mentorSelectInline(mentors, 'tw:mentor'));
   });
 
   bot.hears(MENU.SUPPORTS, adminOnly, async (ctx) => {
@@ -208,113 +111,15 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
     );
   });
 
-  // ── Laptops submenu ──
-  bot.hears(MENU.ADD_LAPTOP, adminOnly, async (ctx) => {
-    ensureSession(ctx).step = STEPS.LAPTOP_ADD;
-    await ctx.reply('Введите номер или номера через пробел:', cancelMenu());
-  });
-
-  bot.hears(MENU.LAPTOP_OCCUPIED, canIssueReturn, async (ctx) => {
-    try {
-      const text = await laptopService.formatAllLaptopsInChat();
-      await ctx.reply(text);
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  bot.hears(MENU.ISSUE_LAPTOP, canIssueReturn, async (ctx) => {
-    try {
-      await showStudentIssueList(ctx);
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  bot.hears(MENU.RETURN_LAPTOP, canIssueReturn, async (ctx) => {
-    try {
-      await showLaptopReturnList(ctx);
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  // ── Teachers submenu ──
-  bot.hears(MENU.ADD_TEACHER, adminOnly, async (ctx) => {
-    ensureSession(ctx).step = STEPS.TEACHER_ADD;
-    await ctx.reply('Введите имя учителя:', cancelMenu());
-  });
-
-  bot.hears(MENU.TEACHER_ISSUE, canIssueReturn, async (ctx) => {
-    ensureSession(ctx).step = STEPS.TEACHER_ISSUE_NAME;
-    await ctx.reply('Введите имя учителя:', cancelMenu());
-  });
-
-  bot.hears(MENU.TEACHER_RETURN, canIssueReturn, async (ctx) => {
-    ensureSession(ctx).menu = 'teacher_return';
-    await replySubmenu(ctx, 'Выберите тип возврата:', teacherReturnMenu());
-  });
-
-  bot.hears(MENU.RETURN_ALL, canIssueReturn, async (ctx) => {
-    const teachers = await getTeachersWithActiveLaptops();
-    if (!teachers.length) {
-      await ctx.reply('✅ Нет учителей с не возвращёнными ноутбуками.');
-      return;
-    }
-    ensureSession(ctx).step = STEPS.TEACHER_RETURN_NAME;
-    ensureSession(ctx).data = { returnMode: 'all' };
-    const lines = teachers.map((t) => `• ${t.name} — ${t.count} шт. (№${t.laptops.join(', №')})`);
+  bot.hears(MENU.MENTORS, adminOnly, async (ctx) => {
+    ensureSession(ctx).menu = 'mentors';
+    const mentors = await mentorService.listMentors();
     await ctx.reply(
-      'Вернуть все ноутбуки учителя:\n\n' + lines.join('\n'),
-      teacherSelectInline(teachers, 'tr:all')
+      mentorService.formatMentorList(mentors) + '\n\nУправление менторами:',
+      mentorsMenu()
     );
   });
 
-  bot.hears(MENU.RETURN_PICK, canIssueReturn, async (ctx) => {
-    const teachers = await getTeachersWithActiveLaptops();
-    if (!teachers.length) {
-      await ctx.reply('✅ Нет учителей с не возвращёнными ноутбуками.');
-      return;
-    }
-    ensureSession(ctx).step = STEPS.TEACHER_RETURN_PICK;
-    const lines = teachers.map((t) => `• ${t.name} — ${t.count} шт. (№${t.laptops.join(', №')})`);
-    await ctx.reply(
-      'Выберите учителя:\n\n' + lines.join('\n'),
-      teacherSelectInline(teachers, 'tr:pick')
-    );
-  });
-
-  // ── Students submenu ──
-  bot.hears(MENU.ADD_STUDENT, adminOnly, async (ctx) => {
-    ensureSession(ctx).step = STEPS.STUDENT_ADD_NAME;
-    await ctx.reply('Введите имя ученика:', cancelMenu());
-  });
-
-  bot.hears(MENU.STUDENT_LIST, canIssueReturn, async (ctx) => {
-    try {
-      const role = await getUserRole(ctx.from.id);
-
-      if (role === 'admin') {
-        const students = await studentService.listManagedStudents();
-        if (!students.length) {
-          await ctx.reply('👨‍🎓 Учеников нет.');
-          return;
-        }
-        await ctx.reply(
-          (await studentService.formatStudentsDetailedList(students)) + '\n\nВыберите ученика:',
-          studentService.studentManageListInline(students)
-        );
-        return;
-      }
-
-      const students = await studentService.listAllowedStudents();
-      await ctx.reply(await studentService.formatStudentsDetailedList(students, { forSupport: true }));
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  // ── Supports submenu ──
   bot.hears(MENU.ADD_SUPPORT, adminOnly, async (ctx) => {
     ensureSession(ctx).step = STEPS.SUPPORT_ADD;
     await ctx.reply('Telegram ID супорта (можно с именем): 123456789 Иван', cancelMenu());
@@ -325,58 +130,17 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
     await ctx.reply('Telegram ID супорта для удаления:', cancelMenu());
   });
 
-  // ── Inline: issue student → laptop ──
-  bot.action(/^issue:student:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-    const student = await studentService.getAllowedStudentById(Number(value));
-    if (!student) {
-      await ctx.reply('❌ Ученик неактивен.');
-      return;
-    }
-    await showLaptopIssueList(ctx, student);
+  bot.hears(MENU.ADD_MENTOR, adminOnly, async (ctx) => {
+    ensureSession(ctx).step = STEPS.MENTOR_ADD;
+    await ctx.reply('Telegram ID и имя ментора: 123456789 Иван', cancelMenu());
   });
 
-  bot.action(/^issue:laptop:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-    if (ctx.session?.step !== STEPS.ISSUE_LAPTOP_SELECT) return;
-
-    try {
-      const laptops = await laptopService.getFreeLaptops();
-      const laptop = laptops.find((l) => l.id === Number(value));
-      if (!laptop) throw new Error('Ноутбук уже занят');
-
-      const result = await issueLaptop({
-        studentId: ctx.session.data.studentId,
-        laptopNumber: laptop.number,
-        adminId: ctx.from.id,
-        recipientType: 'student',
-        requireAllowedStudent: true,
-      });
-
-      clearState(ctx);
-      await replyMain(
-        ctx,
-        `✅ Выдано!\n${formatRecipient(result.transaction)}\nНоутбук: №${result.laptop.number}`
-      );
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
+  bot.hears(MENU.REMOVE_MENTOR, adminOnly, async (ctx) => {
+    ensureSession(ctx).step = STEPS.MENTOR_REMOVE;
+    await ctx.reply('Telegram ID ментора для удаления:', cancelMenu());
   });
 
-  // ── Inline: return laptop ──
-  bot.action(/^return:laptop:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
+  bot.action(/^tw:mentor:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
     await ctx.answerCbQuery();
     const value = ctx.match[1];
     if (value === 'cancel') {
@@ -385,211 +149,28 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
       return;
     }
 
-    try {
-      const { Laptop } = require('../../models');
-      const laptop = await Laptop.findByPk(Number(value));
-      if (!laptop) throw new Error('Ноутбук не найден');
-
-      const result = await returnLaptop({ laptopNumber: laptop.number, adminId: ctx.from.id });
-      clearState(ctx);
-      await replyMain(
-        ctx,
-        `✅ Возврат!\n${formatRecipient(result.transaction)}\nНоутбук: №${result.laptop.number}`
-      );
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
+    ctx.session.data.mentorTelegramId = Number(value);
+    ctx.session.step = STEPS.TAKE_MENTOR_CLASS;
+    await ctx.reply('В какой кабинет/класс?', cancelMenu());
   });
 
-  // ── Inline: student manage (admin) ──
-  bot.action(/^student:manage:(\d+|cancel)$/, adminOnly, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') return;
-
-    const student = await studentService.getManagedStudentById(Number(value));
-    if (!student) {
-      await ctx.reply('❌ Ученик не найден.');
-      return;
-    }
-
-    await ctx.reply(
-      await studentService.formatStudentDetail(student),
-      studentService.studentManageActionsInline(student.id)
-    );
-  });
-
-  bot.action(/^student:extend:(\d+)$/, adminOnly, async (ctx) => {
-    await ctx.answerCbQuery();
-    const studentId = Number(ctx.match[1]);
-    const student = await studentService.getManagedStudentById(studentId);
-    if (!student) {
-      await ctx.reply('❌ Ученик не найден.');
-      return;
-    }
-
-    ensureSession(ctx).step = STEPS.STUDENT_EXTEND_DAYS;
-    ensureSession(ctx).data = { studentId };
-    await ctx.reply(
-      `Ученик: ${student.name}\nСколько дней добавить? (30 = месяц, 1м = месяц)`,
-      cancelMenu()
-    );
-  });
-
-  bot.action(/^student:delete:(\d+)$/, adminOnly, async (ctx) => {
-    await ctx.answerCbQuery();
-    try {
-      const student = await studentService.removeStudent(Number(ctx.match[1]));
-      await ctx.reply(`✅ Ученик «${student.name}» удалён из списка.`);
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  // ── Inline: teacher issue multi-select ──
-  bot.action(/^ti:(toggle:.+|confirm|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const action = ctx.match[1];
-
-    if (action === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-
-    if (action === 'confirm') {
-      try {
-        const selected = ctx.session.data.selectedLaptops || [];
-        const result = await issueTeacherLaptopsByNumbers({
-          teacherName: ctx.session.data.teacherName,
-          laptopNumbers: selected,
-          adminId: ctx.from.id,
-        });
-        clearState(ctx);
-        const lines = result.issued.map((r) => `• №${r.laptop.number}`).join('\n');
-        let msg = `✅ Выдано учителю ${result.teacherName}:\n\n${lines}`;
-        if (result.errors.length) {
-          msg += '\n\n⚠️ ' + result.errors.join('\n');
-        }
-        await replyMain(ctx, msg);
-      } catch (err) {
-        await ctx.reply(`❌ ${err.message}`);
-      }
-      return;
-    }
-
-    const number = action.replace('toggle:', '');
-    const selected = ctx.session.data.selectedLaptops || [];
-    const idx = selected.indexOf(number);
-    if (idx >= 0) selected.splice(idx, 1);
-    else selected.push(number);
-    ctx.session.data.selectedLaptops = selected;
-    await showTeacherLaptopPicker(ctx, true);
-  });
-
-  // ── Inline: teacher return all ──
-  bot.action(/^tr:all:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-
-    try {
-      const result = await returnTeacherLaptops({
-        studentId: Number(value),
-        adminId: ctx.from.id,
-      });
-      clearState(ctx);
-      const lines = result.returned.map((t) => `• №${t.laptop.number}`).join('\n');
-      await replyMain(ctx, `✅ Возврат от ${result.teacherName}:\n\n${lines}`);
-    } catch (err) {
-      await ctx.reply(`❌ ${err.message}`);
-    }
-  });
-
-  // ── Inline: teacher return pick ──
-  bot.action(/^tr:pick:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-
-    const teachers = await getTeachersWithActiveLaptops();
-    const teacher = teachers.find((t) => t.studentId === Number(value));
-    if (!teacher) {
-      await ctx.reply('❌ Учитель не найден.');
-      return;
-    }
-
-    ctx.session.data.teacherId = teacher.studentId;
-    ctx.session.data.teacherName = teacher.name;
-    ctx.session.data.selectedReturnLaptops = [];
-    ctx.session.step = STEPS.TEACHER_RETURN_PICK;
-    await showTeacherReturnPicker(ctx, teacher);
-  });
-
-  bot.action(/^tr:(toggle:.+|confirm|cancel)$/, canIssueReturn, async (ctx) => {
-    await ctx.answerCbQuery();
-    const action = ctx.match[1];
-
-    if (action === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-
-    if (action === 'confirm') {
-      try {
-        const selected = ctx.session.data.selectedReturnLaptops || [];
-        const result = await returnTeacherLaptopsPartial({
-          studentId: ctx.session.data.teacherId,
-          laptopNumbers: selected,
-          adminId: ctx.from.id,
-        });
-        clearState(ctx);
-        const lines = result.returned.map((t) => `• №${t.laptop.number}`).join('\n');
-        await replyMain(ctx, `✅ Возврат от ${result.teacherName}:\n\n${lines}`);
-      } catch (err) {
-        await ctx.reply(`❌ ${err.message}`);
-      }
-      return;
-    }
-
-    const number = action.replace('toggle:', '');
-    const selected = ctx.session.data.selectedReturnLaptops || [];
-    const idx = selected.indexOf(number);
-    if (idx >= 0) selected.splice(idx, 1);
-    else selected.push(number);
-    ctx.session.data.selectedReturnLaptops = selected;
-
-    const teachers = await getTeachersWithActiveLaptops();
-    const teacher = teachers.find((t) => t.studentId === ctx.session.data.teacherId);
-    if (teacher) await showTeacherReturnPicker(ctx, teacher, true);
-  });
-
-  // ── Text steps ──
   bot.on('text', async (ctx, next) => {
     const text = ctx.message.text?.trim();
     if (!text || text.startsWith('/') || text === MENU.CANCEL) return next();
+
+    const menuTexts = Object.values(MENU);
+    if (menuTexts.includes(text)) return next();
 
     const step = ctx.session?.step;
     if (!step) return next();
 
     const userId = ctx.from.id;
     const adminSteps = [
-      STEPS.LAPTOP_ADD,
-      STEPS.STUDENT_ADD_NAME,
-      STEPS.STUDENT_ADD_DURATION,
-      STEPS.STUDENT_EXTEND_DAYS,
       STEPS.SUPPORT_ADD,
       STEPS.SUPPORT_REMOVE,
-      STEPS.TEACHER_ADD,
+      STEPS.MENTOR_ADD,
+      STEPS.MENTOR_REMOVE,
+      STEPS.WAREHOUSE_SET_TOTAL,
     ];
 
     if (adminSteps.includes(step) && !isAdmin(userId)) {
@@ -597,60 +178,49 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
     }
 
     try {
-      if (step === STEPS.LAPTOP_ADD) {
-        const result = await laptopService.addLaptops(text);
+      if (step === STEPS.WAREHOUSE_SET_TOTAL) {
+        const result = await warehouseService.setWarehouseTotal(text);
         clearState(ctx);
-        const lines = result.added.map((l) => `• №${l.number}`).join('\n');
-        await replyMain(ctx, `✅ Добавлено:\n${lines}`);
+        await replyMain(ctx, `✅ Всего ноутов: ${result.total} (${result.available} на складе)`);
         return;
       }
 
-      if (step === STEPS.TEACHER_ADD) {
-        const name = text.trim();
-        await Student.findOrCreate({ where: { name }, defaults: { name, isAllowed: false } });
-        clearState(ctx);
-        await replyMain(ctx, `✅ Учитель «${name}» добавлен.`);
+      if (step === STEPS.TAKE_WAREHOUSE_QTY) {
+        const qty = Number(text);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error('Введите число больше 0');
+        }
+        const stats = await warehouseService.getWarehouseStats();
+        if (qty > stats.available) {
+          throw new Error(`На складе только ${stats.available} ноутов`);
+        }
+        ctx.session.data.count = qty;
+        ctx.session.step = STEPS.TAKE_WAREHOUSE_DEST;
+        await ctx.reply(`Куда направить ${qty} ноутов?`, destMenu());
         return;
       }
 
-      if (step === STEPS.TEACHER_ISSUE_NAME) {
-        ctx.session.data.teacherName = text;
-        ctx.session.data.selectedLaptops = [];
-        ctx.session.step = STEPS.TEACHER_ISSUE_LAPTOPS;
-        await showTeacherLaptopPicker(ctx);
-        return;
-      }
-
-      if (step === STEPS.STUDENT_ADD_NAME) {
-        ctx.session.data.studentName = text;
-        ctx.session.step = STEPS.STUDENT_ADD_DURATION;
-        await ctx.reply('На сколько дней? (30 = месяц, 1м = месяц, 60 = 2 месяца)');
-        return;
-      }
-
-      if (step === STEPS.STUDENT_ADD_DURATION) {
-        const { student, days } = await studentService.addAllowedStudent(
-          ctx.session.data.studentName,
-          text
-        );
+      if (step === STEPS.TAKE_MENTOR_CLASS) {
+        const { count, mentorTelegramId } = ctx.session.data;
+        const result = await warehouseService.giveToMentor({
+          count,
+          mentorTelegramId,
+          className: text,
+        });
         clearState(ctx);
         await replyMain(
           ctx,
-          `✅ «${student.name}» добавлен на ${days} дн. до ${student.activeUntil.toLocaleDateString('ru-RU')}`
+          `✅ Ментору ${result.mentor.name}: ${result.count} шт.\n🚪 Кабинет: ${text}`
         );
-        return;
-      }
 
-      if (step === STEPS.STUDENT_EXTEND_DAYS) {
-        const { student, days } = await studentService.extendStudentDays(
-          ctx.session.data.studentId,
-          text
-        );
-        clearState(ctx);
-        await replyMain(
-          ctx,
-          `✅ «${student.name}» продлён на ${days} дн.\nАктивен до ${student.activeUntil.toLocaleDateString('ru-RU')}`
-        );
+        try {
+          await ctx.telegram.sendMessage(
+            mentorTelegramId,
+            `✅ Вам выдано ${result.count} ноутов\n🚪 Кабинет: ${text}`
+          );
+        } catch {
+          // mentor may have blocked bot
+        }
         return;
       }
 
@@ -669,13 +239,37 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
       if (step === STEPS.SUPPORT_REMOVE) {
         await supportService.removeSupport(text);
         clearState(ctx);
-        await replyMain(ctx, `✅ Супорт удалён.`);
+        await replyMain(ctx, '✅ Супорт удалён.');
+        return;
+      }
+
+      if (step === STEPS.MENTOR_ADD) {
+        const parts = text.split(/\s+/);
+        const telegramId = parts[0];
+        const name = parts[1];
+        if (!name) throw new Error('Формат: ID Имя');
+        await mentorService.addMentor({
+          telegramId,
+          name,
+          createdBy: userId,
+        });
+        clearState(ctx);
+        await replyMain(ctx, `✅ Ментор «${name}» добавлен.`);
+        return;
+      }
+
+      if (step === STEPS.MENTOR_REMOVE) {
+        await mentorService.removeMentor(text);
+        clearState(ctx);
+        await replyMain(ctx, '✅ Ментор удалён.');
         return;
       }
     } catch (err) {
       await ctx.reply(`❌ ${err.message}`);
     }
+
+    return next();
   });
 }
 
-module.exports = { registerMenuHandlers };
+module.exports = { registerMenuHandlers, replyMain, ensureSession };

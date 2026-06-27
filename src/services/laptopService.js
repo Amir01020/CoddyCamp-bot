@@ -57,7 +57,7 @@ async function listAllLaptops() {
 
 async function getFreeLaptops() {
   const activeIds = await getActiveLaptopIds();
-  const where = { isActive: true };
+  const where = { isActive: true, inCoworking: true };
 
   if (activeIds.length) {
     where.id = { [Op.notIn]: activeIds };
@@ -99,7 +99,10 @@ function formatLaptopListInChat(laptops, activeIds, occupiedMap) {
       const who = occupiedMap.get(laptop.id) || 'занят';
       return `• №${laptop.number} — занят (${who})`;
     }
-    return `• №${laptop.number} — свободен`;
+    if (laptop.inCoworking) {
+      return `• №${laptop.number} — на коворкинге (свободен)`;
+    }
+    return `• №${laptop.number} — зарегистрирован (не на коворкинге)`;
   });
 
   return lines.join('\n');
@@ -112,7 +115,10 @@ async function formatAllLaptopsInChat() {
   const occupiedMap = new Map();
 
   for (const t of transactions) {
-    occupiedMap.set(t.laptopId, t.recipientType === 'teacher' ? `${t.student.name} (учитель)` : t.student.name);
+    const labels = { teacher: 'учитель', mentor: 'ментор', student: '' };
+    const suffix = labels[t.recipientType] || '';
+    const who = suffix ? `${t.student.name} (${suffix})` : t.student.name;
+    occupiedMap.set(t.laptopId, who);
   }
 
   const stats = {
@@ -168,10 +174,9 @@ function formatOccupiedLaptops(transactions) {
   }
 
   const lines = transactions.map((transaction) => {
-    const who =
-      transaction.recipientType === 'teacher'
-        ? `${transaction.student.name} (учитель)`
-        : transaction.student.name;
+    const labels = { teacher: 'учитель', mentor: 'ментор' };
+    const suffix = labels[transaction.recipientType];
+    const who = suffix ? `${transaction.student.name} (${suffix})` : transaction.student.name;
     return `• №${transaction.laptop.number} — ${who} (с ${formatTime(transaction.issuedAt)})`;
   });
 

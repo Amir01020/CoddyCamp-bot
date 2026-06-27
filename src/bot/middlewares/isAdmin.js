@@ -1,4 +1,4 @@
-const { SupportUser } = require('../../models');
+const { SupportUser, MentorUser } = require('../../models');
 
 function getAdminIds() {
   const raw = process.env.ADMIN_IDS || '';
@@ -23,15 +23,27 @@ async function isSupport(userId) {
   return !!support;
 }
 
+async function isMentor(userId) {
+  if (isAdmin(userId)) return false;
+
+  const mentor = await MentorUser.findOne({
+    where: { telegramId: userId, isActive: true },
+  });
+  return !!mentor;
+}
+
 async function getUserRole(userId) {
   if (isAdmin(userId)) return 'admin';
   if (await isSupport(userId)) return 'support';
+  if (await isMentor(userId)) return 'mentor';
   return null;
 }
 
 async function isAuthorized(userId) {
   if (isAdmin(userId)) return true;
-  return isSupport(userId);
+  if (await isSupport(userId)) return true;
+  if (await isMentor(userId)) return true;
+  return false;
 }
 
 function isMyIdCommand(ctx) {
@@ -63,13 +75,22 @@ async function canIssueReturn(ctx, next) {
   return ctx.reply('⛔ Нет доступа. Обратитесь к администратору.');
 }
 
+async function mentorOnly(ctx, next) {
+  const userId = ctx.from?.id;
+  if (isAdmin(userId)) return next();
+  if (await isMentor(userId)) return next();
+  return ctx.reply('⛔ Эта функция доступна только менторам.');
+}
+
 module.exports = {
   getAdminIds,
   isAdmin,
   isSupport,
+  isMentor,
   isAuthorized,
   getUserRole,
   authorizedOnly,
   adminOnly,
   canIssueReturn,
+  mentorOnly,
 };

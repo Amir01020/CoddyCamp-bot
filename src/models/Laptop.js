@@ -18,6 +18,12 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: true,
         field: 'is_active',
       },
+      inCoworking: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'in_coworking',
+      },
     },
     {
       tableName: 'laptops',
