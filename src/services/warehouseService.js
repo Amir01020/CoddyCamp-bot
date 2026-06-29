@@ -121,6 +121,44 @@ async function giveToMentor({ count, mentorTelegramId, className }) {
   return { mentor, count: qty };
 }
 
+async function takeFromMentor({ mentorTelegramId, count, destination }) {
+  const qty = Number(count);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    throw new Error('Некорректное количество');
+  }
+  if (!['warehouse', 'coworking'].includes(destination)) {
+    throw new Error('Некорректное назначение');
+  }
+
+  const mentor = await MentorUser.findOne({
+    where: { telegramId: mentorTelegramId, isActive: true },
+  });
+  if (!mentor) {
+    throw new Error('Ментор не найден');
+  }
+
+  const total = (mentor.warehouseHoldings || 0) + (mentor.coworkingHoldings || 0);
+  if (qty > total) {
+    throw new Error(`У ментора только ${total} ноутов`);
+  }
+
+  const whTake = Math.min(qty, mentor.warehouseHoldings || 0);
+  const cwTake = qty - whTake;
+  mentor.warehouseHoldings = (mentor.warehouseHoldings || 0) - whTake;
+  mentor.coworkingHoldings = (mentor.coworkingHoldings || 0) - cwTake;
+  await mentor.save();
+
+  if (destination === 'warehouse') {
+    const available = await getSetting('warehouse_available');
+    await setSetting('warehouse_available', available + qty);
+  } else {
+    const coworking = await getSetting('coworking_count');
+    await setSetting('coworking_count', coworking + qty);
+  }
+
+  return { mentor, count: qty, destination };
+}
+
 async function formatFullInfo() {
   const stats = await getWarehouseStats();
   const mentors = await MentorUser.findAll({
@@ -166,6 +204,7 @@ module.exports = {
   moveToCoworking,
   moveToWarehouse,
   giveToMentor,
+  takeFromMentor,
   formatFullInfo,
   formatWarehouseStatus,
   getTotalMentorHoldings,

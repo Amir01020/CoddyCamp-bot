@@ -14,7 +14,19 @@ const mentorMainMenu = () =>
   Markup.keyboard([[MENU.MENTOR_REQUEST, MENU.MENTOR_RETURN]]).resize();
 
 const warehouseAdminMenu = () =>
-  Markup.keyboard([[MENU.TAKE_FROM_WAREHOUSE], [MENU.WAREHOUSE_SET], [MENU.BACK]]).resize();
+  Markup.keyboard([
+    [MENU.TAKE_FROM_WAREHOUSE],
+    [MENU.TAKE_FROM_COWORKING, MENU.TAKE_FROM_MENTOR],
+    [MENU.WAREHOUSE_SET],
+    [MENU.BACK],
+  ]).resize();
+
+const warehouseSupportMenu = () =>
+  Markup.keyboard([
+    [MENU.TAKE_FROM_WAREHOUSE],
+    [MENU.TAKE_FROM_COWORKING, MENU.TAKE_FROM_MENTOR],
+    [MENU.BACK],
+  ]).resize();
 
 const supportsMenu = () =>
   Markup.keyboard([[MENU.ADD_SUPPORT, MENU.REMOVE_SUPPORT], [MENU.BACK]]).resize();
@@ -29,6 +41,12 @@ const cancelMenu = () => Markup.keyboard([[MENU.CANCEL]]).resize();
 
 const destMenu = () =>
   Markup.keyboard([[MENU.DEST_COWORKING, MENU.DEST_MENTOR], [MENU.CANCEL]]).resize();
+
+const takeQtyMenu = () =>
+  Markup.keyboard([[MENU.TAKE_ALL, MENU.TAKE_CUSTOM], [MENU.CANCEL]]).resize();
+
+const returnDestMenu = () =>
+  Markup.keyboard([[MENU.TO_WAREHOUSE, MENU.TO_COWORKING], [MENU.CANCEL]]).resize();
 
 function menuForRole(role) {
   if (role === 'admin') return adminMainMenu();
@@ -48,7 +66,9 @@ function supportSelectInline(supports, prefix) {
 function mentorSelectInline(mentors, prefix) {
   const rows = mentors.map((m) => {
     const group = m.groupName ? ` (${m.groupName})` : '';
-    return [Markup.button.callback(`${m.name}${group}`, `${prefix}:${m.telegramId}`)];
+    const total = (m.warehouseHoldings || 0) + (m.coworkingHoldings || 0);
+    const count = total > 0 ? ` — ${total} шт.` : '';
+    return [Markup.button.callback(`${m.name}${group}${count}`, `${prefix}:${m.telegramId}`)];
   });
   rows.push([Markup.button.callback(MENU.CANCEL, `${prefix}:cancel`)]);
   return Markup.inlineKeyboard(rows);
@@ -75,11 +95,14 @@ module.exports = {
   supportMainMenu,
   mentorMainMenu,
   warehouseAdminMenu,
+  warehouseSupportMenu,
   supportsMenu,
   mentorsMenu,
   mentorReturnMenu,
   cancelMenu,
   destMenu,
+  returnDestMenu,
+  takeQtyMenu,
   menuForRole,
   supportSelectInline,
   mentorSelectInline,

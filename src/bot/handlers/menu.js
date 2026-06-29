@@ -3,25 +3,41 @@ const { clearState } = require('../session');
 const {
   menuForRole,
   warehouseAdminMenu,
+  warehouseSupportMenu,
   supportsMenu,
   mentorsMenu,
   cancelMenu,
   destMenu,
+  returnDestMenu,
+  takeQtyMenu,
   mentorSelectInline,
 } = require('../keyboards');
 const { getUserRole, isAdmin } = require('../middlewares/isAdmin');
 const supportService = require('../../services/supportService');
 const mentorService = require('../../services/mentorService');
 const warehouseService = require('../../services/warehouseService');
+const { safeReply, formatUserError } = require('../utils/telegram');
 
 async function replyMain(ctx, text) {
   const role = await getUserRole(ctx.from.id);
-  await ctx.reply(text, menuForRole(role));
+  await safeReply(ctx, text, menuForRole(role));
 }
 
 function ensureSession(ctx) {
   ctx.session = ctx.session || {};
   return ctx.session;
+}
+
+async function notifyMentorTaken(ctx, result) {
+  const dest = result.destination === 'warehouse' ? 'на склад' : 'на коворкинг';
+  try {
+    await ctx.telegram.sendMessage(
+      result.mentor.telegramId,
+      `📥 Супорт забрал ${result.count} ноутов (${dest})`
+    );
+  } catch {
+    // mentor may have blocked bot
+  }
 }
 
 function startTakeFromWarehouse(ctx) {
@@ -59,16 +75,115 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
 
   bot.hears(MENU.WAREHOUSE, canIssueReturn, async (ctx) => {
     const role = await getUserRole(ctx.from.id);
+    ensureSession(ctx).menu = 'warehouse';
     if (role === 'admin') {
-      ensureSession(ctx).menu = 'warehouse';
       await ctx.reply('📦 Склад:', warehouseAdminMenu());
       return;
     }
-    await promptTakeQuantity(ctx);
+    await ctx.reply('📦 Склад:', warehouseSupportMenu());
   });
 
   bot.hears(MENU.TAKE_FROM_WAREHOUSE, canIssueReturn, async (ctx) => {
     await promptTakeQuantity(ctx);
+  });
+
+  bot.hears(MENU.TAKE_FROM_COWORKING, canIssueReturn, async (ctx) => {
+    const stats = await warehouseService.getWarehouseStats();
+    if (!stats.coworking) {
+      await ctx.reply('❌ На коворкинге нет ноутбуков.');
+      return;
+    }
+    ensureSession(ctx).step = STEPS.TAKE_FROM_COWORKING_QTY;
+    ensureSession(ctx).data = {};
+    await ctx.reply(
+      `На коворкинге: ${stats.coworking} шт.\n\nСколько забрать на склад?`,
+      cancelMenu()
+    );
+  });
+
+  bot.hears(MENU.TAKE_FROM_MENTOR, canIssueReturn, async (ctx) => {
+    const mentors = await mentorService.listMentors();
+    const withHoldings = mentors.filter(
+      (m) => (m.warehouseHoldings || 0) + (m.coworkingHoldings || 0) > 0
+    );
+    if (!withHoldings.length) {
+      await ctx.reply('❌ Ни у одного ментора нет ноутбуков.');
+      return;
+    }
+    ensureSession(ctx).step = STEPS.TAKE_FROM_MENTOR_PICK;
+    ensureSession(ctx).data = {};
+    await ctx.reply('У кого забрать ноутбуки?', mentorSelectInline(withHoldings, 'fm:mentor'));
+  });
+
+  bot.hears(MENU.TAKE_ALL, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_FROM_MENTOR_PICK) return;
+    const maxQty = ctx.session.data.maxQty;
+    if (!maxQty) return;
+
+    ctx.session.data.count = maxQty;
+    ctx.session.step = STEPS.TAKE_FROM_MENTOR_DEST;
+    await ctx.reply(`Куда положить ${maxQty} ноутов?`, returnDestMenu());
+  });
+
+  bot.hears(MENU.TAKE_CUSTOM, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_FROM_MENTOR_PICK) return;
+    const maxQty = ctx.session.data.maxQty;
+    if (!maxQty) return;
+
+    ctx.session.step = STEPS.TAKE_FROM_MENTOR_QTY_INPUT;
+    await ctx.reply(`Введите количество (макс. ${maxQty}):`, cancelMenu());
+  });
+
+  bot.hears(MENU.TO_WAREHOUSE, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_FROM_MENTOR_DEST || !ctx.session.data?.count) return;
+
+    const { mentorTelegramId, count } = ctx.session.data;
+    let result;
+    try {
+      result = await warehouseService.takeFromMentor({
+        mentorTelegramId,
+        count,
+        destination: 'warehouse',
+      });
+    } catch (err) {
+      await safeReply(ctx, `❌ ${err.message}`);
+      return;
+    }
+
+    clearState(ctx);
+    const text = `✅ Забрано у ${result.mentor.name}: ${result.count} шт. → на склад`;
+    try {
+      await replyMain(ctx, text);
+    } catch (err) {
+      await safeReply(ctx, `${text}\n\n(нажмите /start для обновления меню)`);
+    }
+    notifyMentorTaken(ctx, result);
+  });
+
+  bot.hears(MENU.TO_COWORKING, canIssueReturn, async (ctx) => {
+    if (ctx.session?.step !== STEPS.TAKE_FROM_MENTOR_DEST || !ctx.session.data?.count) return;
+
+    const { mentorTelegramId, count } = ctx.session.data;
+    let result;
+    try {
+      result = await warehouseService.takeFromMentor({
+        mentorTelegramId,
+        count,
+        destination: 'coworking',
+      });
+    } catch (err) {
+      await safeReply(ctx, `❌ ${err.message}`);
+      return;
+    }
+
+    clearState(ctx);
+    const text = `✅ Забрано у ${result.mentor.name}: ${result.count} шт. → на коворкинг`;
+    try {
+      await replyMain(ctx, text);
+    } catch (err) {
+      await safeReply(ctx, `${text}\n\n(нажмите /start для обновления меню)`);
+    }
+    notifyMentorTaken(ctx, result);
   });
 
   bot.hears(MENU.WAREHOUSE_SET, adminOnly, async (ctx) => {
@@ -140,6 +255,38 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
     await ctx.reply('Telegram ID ментора для удаления:', cancelMenu());
   });
 
+  bot.action(/^fm:mentor:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
+    await ctx.answerCbQuery();
+    const value = ctx.match[1];
+    if (value === 'cancel') {
+      clearState(ctx);
+      await replyMain(ctx, 'Отменено.');
+      return;
+    }
+
+    const mentor = await mentorService.getMentorByTelegramId(Number(value));
+    if (!mentor) {
+      await ctx.reply('❌ Ментор не найден.');
+      return;
+    }
+
+    const holdings = await mentorService.getMentorHoldings(Number(value));
+    if (!holdings.total) {
+      await ctx.reply('❌ У ментора нет ноутбуков.');
+      return;
+    }
+
+    ctx.session.data.mentorTelegramId = Number(value);
+    ctx.session.data.mentorName = mentor.name;
+    ctx.session.data.maxQty = holdings.total;
+    ctx.session.step = STEPS.TAKE_FROM_MENTOR_PICK;
+
+    await ctx.reply(
+      `${mentor.name}: ${holdings.total} шт.\n\nСколько забрать?`,
+      takeQtyMenu()
+    );
+  });
+
   bot.action(/^tw:mentor:(\d+|cancel)$/, canIssueReturn, async (ctx) => {
     await ctx.answerCbQuery();
     const value = ctx.match[1];
@@ -197,6 +344,35 @@ function registerMenuHandlers(bot, adminOnly, canIssueReturn) {
         ctx.session.data.count = qty;
         ctx.session.step = STEPS.TAKE_WAREHOUSE_DEST;
         await ctx.reply(`Куда направить ${qty} ноутов?`, destMenu());
+        return;
+      }
+
+      if (step === STEPS.TAKE_FROM_COWORKING_QTY) {
+        const qty = Number(text);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error('Введите число больше 0');
+        }
+        const result = await warehouseService.moveToWarehouse({ count: qty });
+        clearState(ctx);
+        await replyMain(ctx, `✅ С коворкинга на склад: ${result.moved} шт.`);
+        return;
+      }
+
+      if (step === STEPS.TAKE_FROM_MENTOR_QTY_INPUT) {
+        const qty = Number(text);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error('Введите число больше 0');
+        }
+        const maxQty = ctx.session.data.maxQty;
+        if (!maxQty) {
+          throw new Error('Сначала выберите ментора');
+        }
+        if (qty > maxQty) {
+          throw new Error(`У ментора только ${maxQty} ноутов`);
+        }
+        ctx.session.data.count = qty;
+        ctx.session.step = STEPS.TAKE_FROM_MENTOR_DEST;
+        await ctx.reply(`Куда положить ${qty} ноутов?`, returnDestMenu());
         return;
       }
 

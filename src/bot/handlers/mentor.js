@@ -4,7 +4,7 @@ const {
   mentorReturnMenu,
   cancelMenu,
   supportSelectInline,
-  qtyInline,
+  takeQtyMenu,
 } = require('../keyboards');
 const { getUserRole } = require('../middlewares/isAdmin');
 const mentorService = require('../../services/mentorService');
@@ -78,29 +78,29 @@ function registerMentorHandlers(bot, mentorOnlyMw) {
   bot.hears(MENU.RETURN_PICK, mentorOnlyMw, async (ctx) => {
     if (ctx.session?.menu !== 'mentor_return') return;
     const holdings = ctx.session.data.holdings || (await mentorService.getMentorHoldings(ctx.from.id));
-    ensureSession(ctx).step = STEPS.MENTOR_RETURN_QTY;
-    await ctx.reply(
-      `У вас ${holdings.total} шт.\nСколько вернуть?`,
-      qtyInline(holdings.total, 'mr:qty')
-    );
+    ctx.session.data.maxQty = holdings.total;
+    ctx.session.step = STEPS.MENTOR_RETURN_QTY;
+    await ctx.reply(`У вас ${holdings.total} шт.\nСколько вернуть?`, takeQtyMenu());
   });
 
-  bot.action(/^mr:qty:(\d+|cancel)$/, mentorOnlyMw, async (ctx) => {
-    await ctx.answerCbQuery();
-    const value = ctx.match[1];
-    if (value === 'cancel') {
-      clearState(ctx);
-      await replyMain(ctx, 'Отменено.');
-      return;
-    }
-
-    const qty = Number(value);
+  bot.hears(MENU.TAKE_ALL, mentorOnlyMw, async (ctx) => {
+    if (ctx.session?.step !== STEPS.MENTOR_RETURN_QTY) return;
     const holdings = ctx.session.data.holdings;
-    const split = mentorService.splitReturnQty(holdings, qty);
-    ctx.session.data.warehouseReturnQty = split.warehouseQuantity;
-    ctx.session.data.coworkingReturnQty = split.coworkingQuantity;
+    if (!holdings) return;
+
+    ctx.session.data.warehouseReturnQty = holdings.warehouse;
+    ctx.session.data.coworkingReturnQty = holdings.coworking;
     ctx.session.step = STEPS.MENTOR_RETURN_SUPPORT;
     await showMentorReturnSupportList(ctx);
+  });
+
+  bot.hears(MENU.TAKE_CUSTOM, mentorOnlyMw, async (ctx) => {
+    if (ctx.session?.step !== STEPS.MENTOR_RETURN_QTY) return;
+    const maxQty = ctx.session.data.maxQty;
+    if (!maxQty) return;
+
+    ctx.session.step = STEPS.MENTOR_RETURN_QTY_INPUT;
+    await ctx.reply(`Введите количество (макс. ${maxQty}):`, cancelMenu());
   });
 
   bot.action(/^mr:support:(\d+|cancel)$/, mentorOnlyMw, async (ctx) => {
@@ -130,6 +130,9 @@ function registerMentorHandlers(bot, mentorOnlyMw) {
     const text = ctx.message.text?.trim();
     if (!text || text === MENU.CANCEL) return next();
 
+    const menuTexts = Object.values(MENU);
+    if (menuTexts.includes(text)) return next();
+
     try {
       if (step === STEPS.MENTOR_REQUEST_QTY) {
         const qty = Number(text);
@@ -139,6 +142,23 @@ function registerMentorHandlers(bot, mentorOnlyMw) {
         ctx.session.data.quantity = qty;
         ctx.session.step = STEPS.MENTOR_REQUEST_CABINET;
         await ctx.reply('В какой кабинет?', cancelMenu());
+        return;
+      }
+
+      if (step === STEPS.MENTOR_RETURN_QTY_INPUT) {
+        const qty = Number(text);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error('Введите число больше 0');
+        }
+        const holdings = ctx.session.data.holdings;
+        if (qty > holdings.total) {
+          throw new Error(`У вас только ${holdings.total} ноутов`);
+        }
+        const split = mentorService.splitReturnQty(holdings, qty);
+        ctx.session.data.warehouseReturnQty = split.warehouseQuantity;
+        ctx.session.data.coworkingReturnQty = split.coworkingQuantity;
+        ctx.session.step = STEPS.MENTOR_RETURN_SUPPORT;
+        await showMentorReturnSupportList(ctx);
         return;
       }
 

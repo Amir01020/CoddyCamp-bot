@@ -11,6 +11,7 @@ const {
   getAdminIds,
   getUserRole,
 } = require('./middlewares/isAdmin');
+const { safeReply, formatUserError } = require('./utils/telegram');
 const { menuForRole } = require('./keyboards');
 const { registerMenuHandlers } = require('./handlers/menu');
 const { registerMentorHandlers } = require('./handlers/mentor');
@@ -26,8 +27,12 @@ const proxyUrl = process.env.TELEGRAM_PROXY || process.env.HTTPS_PROXY;
 const botOptions = {};
 
 if (proxyUrl) {
-  botOptions.telegram = { agent: createProxyAgent(proxyUrl) };
+  botOptions.telegram = {
+    agent: createProxyAgent(proxyUrl),
+  };
   console.log('🌐 Используется прокси для Telegram:', maskProxyUrl(proxyUrl));
+} else {
+  console.log('⚠️ TELEGRAM_PROXY не задан — при ECONNRESET добавьте прокси в .env');
 }
 
 const bot = new Telegraf(token, botOptions);
@@ -60,7 +65,7 @@ bot.start(async (ctx) => {
       '👥 Супорты / 👨‍🏫 Менторы — управление',
     support:
       'Меню:\n' +
-      '📦 Склад — взять со склада (коворкинг или ментору)\n' +
+      '📦 Склад — взять со склада, забрать с коворкинга или у ментора\n' +
       'ℹ️ Информация — текущие остатки',
     mentor:
       'Меню:\n' +
@@ -81,6 +86,15 @@ bot.help(async (ctx) => {
 registerMenuHandlers(bot, adminOnly, canIssueReturn);
 registerMentorHandlers(bot, mentorOnly);
 registerRequestHandlers(bot, canIssueReturn);
+
+bot.catch(async (err, ctx) => {
+  console.error('Bot error:', err);
+  try {
+    await safeReply(ctx, `❌ ${formatUserError(err)}`);
+  } catch {
+    // ignore secondary network failure
+  }
+});
 
 async function start() {
   try {
